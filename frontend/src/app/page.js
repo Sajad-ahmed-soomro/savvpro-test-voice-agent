@@ -481,35 +481,43 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="glass-card" style={{ padding: "1rem 1.25rem" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-sm)" }}>
-                <input
-                  type="checkbox"
-                  checked={ttsEnabled}
-                  onChange={(e) => setTtsEnabled(e.target.checked)}
-                />
-                Speak assistant replies
-              </label>
+          <div className="glass-card voice-settings-card">
+            <div className="card-header">
+              <span className="icon" aria-hidden>
+                ⚙️
+              </span>
+              <h2>Controls & Audio</h2>
+            </div>
+            <div className="voice-settings-body">
+              <div className="settings-row">
+                <label className="settings-toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={ttsEnabled}
+                    onChange={(e) => setTtsEnabled(e.target.checked)}
+                  />
+                  <span>Speak assistant replies</span>
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => speak("Hello! Voice output is working perfectly.")}
+                  title="Test audio through your speakers"
+                >
+                  🔊 Test
+                </button>
+              </div>
+
               <button
                 type="button"
-                className="btn btn-ghost"
-                style={{ fontSize: "var(--font-xs)", padding: "0.25rem 0.6rem" }}
-                onClick={() => speak("Hello! Voice output is working perfectly.")}
-                title="Test audio through your speakers"
+                className="btn btn-new-conv"
+                onClick={resetConversation}
+                disabled={loading}
+                title="Start a new booking conversation"
               >
-                🔊 Test
+                ↺ New Conversation
               </button>
             </div>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ width: "100%", marginTop: "0.75rem" }}
-              onClick={resetConversation}
-              disabled={loading}
-            >
-              New conversation
-            </button>
           </div>
         </aside>
       </div>
