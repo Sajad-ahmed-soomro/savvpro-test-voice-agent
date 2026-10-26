@@ -1,0 +1,424 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getConversation, sendMessage, startConversation } from "../lib/api";
+import { useSpeech } from "../hooks/useSpeech";
+
+const RESTAURANT_NAME = "La Bella Tavola";
+
+const FLOW_STEPS = [
+  { key: "ask_date", label: "Date" },
+  { key: "ask_time", label: "Time" },
+  { key: "ask_party_size", label: "Party size" },
+  { key: "ask_name", label: "Name" },
+  { key: "confirm", label: "Confirm" },
+  { key: "booked", label: "Booked" },
+];
+
+function formatDate(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function formatTime(iso) {
+  if (!iso) return null;
+  const [h, m] = iso.split(":");
+  const date = new Date();
+  date.setHours(Number(h), Number(m || 0), 0, 0);
+  return date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function stepStatus(stepKey, currentState) {
+  const order = FLOW_STEPS.map((s) => s.key);
+  const currentIdx = order.indexOf(currentState);
+  const stepIdx = order.indexOf(stepKey);
+
+  if (currentState === "cancelled") return "cancelled";
+  if (currentState === "booked" || currentState === "goodbye") {
+    return stepIdx <= order.indexOf("booked") ? "completed" : "";
+  }
+  if (stepIdx < currentIdx) return "completed";
+  if (stepIdx === currentIdx) return "current";
+  return "";
+}
+
+export default function Home() {
+  const [messages, setMessages] = useState([]);
+  const [conversationId, setConversationId] = useState(null);
+  const [stateInfo, setStateInfo] = useState(null);
+  const [decisionLog, setDecisionLog] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [connected, setConnected] = useState(null);
+  const messagesEndRef = useRef(null);
+
+  const appendMessage = useCallback((role, text) => {
+    setMessages((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, role, text }]);
+  }, []);
+
+  const refreshDecisions = useCallback(async (convId) => {
+    if (!convId) return;
+    const detail = await getConversation(convId);
+    const entries = detail.turns
+      .filter((t) => t.role === "user" && t.extracted)
+      .map((t) => ({
+        text: t.text,
+        intents: t.extracted?.intents || [],
+        entities: t.extracted?.entities || {},
+        state: t.state,
+      }));
+    setDecisionLog(entries.slice(-8));
+  }, []);
+
+  const handleAssistantReply = useCallback(
+    async (convId, responseText, state) => {
+      appendMessage("assistant", responseText);
+      setStateInfo(state);
+      await refreshDecisions(convId);
+      return responseText;
+    },
+    [appendMessage, refreshDecisions],
+  );
+
+  const processUserText = useCallback(
+    async (text) => {
+      const trimmed = text.trim();
+      if (!trimmed || loading) return;
+
+      setError(null);
+      appendMessage("user", trimmed);
+      setInput("");
+      setLoading(true);
+
+      try {
+        let convId = conversationId;
+        if (!convId) {
+          const start = await startConversation();
+          convId = start.conversation_id;
+          setConversationId(convId);
+          setStateInfo(start.state);
+        }
+
+        const result = await sendMessage(convId, trimmed);
+        const reply = await handleAssistantReply(convId, result.response, result.state);
+        speak(reply);
+      } catch (err) {
+        setError(err.message || "Something went wrong");
+        setConnected(false);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [appendMessage, conversationId, handleAssistantReply, loading],
+  );
+
+  const { listening, speechSupported, ttsEnabled, setTtsEnabled, speak, startListening, stopListening } =
+    useSpeech({ onTranscript: processUserText, enabled: !loading });
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function boot() {
+      setLoading(true);
+      setError(null);
+      try {
+        const start = await startConversation();
+        if (cancelled) return;
+        setConnected(true);
+        setConversationId(start.conversation_id);
+        setStateInfo(start.state);
+        setMessages([{ id: "greeting", role: "assistant", text: start.response }]);
+        if (typeof window !== "undefined" && window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance(start.response);
+          window.speechSynthesis.speak(utterance);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setConnected(false);
+          setError(
+            err.message ||
+              "Cannot reach the backend. Start it with: cd backend && uvicorn main:app --reload",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    boot();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const resetConversation = async () => {
+    setLoading(true);
+    setError(null);
+    setMessages([]);
+    setDecisionLog([]);
+    stopListening();
+    try {
+      const start = await startConversation();
+      setConnected(true);
+      setConversationId(start.conversation_id);
+      setStateInfo(start.state);
+      appendMessage("assistant", start.response);
+      speak(start.response);
+    } catch (err) {
+      setConnected(false);
+      setError(err.message || "Failed to start a new conversation");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const booking = stateInfo?.booking;
+  const currentState = stateInfo?.state || "greeting";
+
+  return (
+    <div className="app-container">
+      <header className="app-header">
+        <h1>Voice Assistant</h1>
+        <p className="subtitle">Rule-based restaurant booking — no LLM in the loop</p>
+        <div className="restaurant-badge">
+          <span className="dot" aria-hidden />
+          {RESTAURANT_NAME}
+        </div>
+      </header>
+
+      <div className="main-content">
+        <section className="glass-card conversation-panel" aria-label="Conversation">
+          <div className="card-header">
+            <span className="icon" aria-hidden>
+              💬
+            </span>
+            <h2>Conversation</h2>
+            <div
+              className={`connection-status ${connected ? "connected" : "disconnected"}`}
+              style={{ marginLeft: "auto" }}
+            >
+              <span className="dot" aria-hidden />
+              {connected === null ? "Connecting…" : connected ? "Backend online" : "Backend offline"}
+            </div>
+          </div>
+
+          <div className="conversation-messages">
+            {messages.length === 0 && !loading && (
+              <div className="empty-state">
+                <span className="icon" aria-hidden>
+                  🎙️
+                </span>
+                <p>Say hello or type a message to book a table.</p>
+              </div>
+            )}
+
+            {messages.map((msg) => (
+              <div key={msg.id} className={`message ${msg.role}`}>
+                <div className="message-label">{msg.role === "user" ? "You" : "Assistant"}</div>
+                {msg.text}
+              </div>
+            ))}
+
+            {loading && (
+              <div className="typing-indicator" aria-label="Assistant is thinking">
+                <span />
+                <span />
+                <span />
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {error && (
+            <p className="fade-in" style={{ padding: "0 1.5rem", color: "var(--error)", fontSize: "var(--font-sm)" }}>
+              {error}
+            </p>
+          )}
+
+          <div className="input-area">
+            <button
+              type="button"
+              className={`mic-btn ${listening ? "listening" : ""}`}
+              onClick={listening ? stopListening : startListening}
+              disabled={!speechSupported || loading || connected === false}
+              title={
+                speechSupported
+                  ? listening
+                    ? "Stop listening"
+                    : "Speak your message"
+                  : "Speech recognition not supported in this browser"
+              }
+              aria-label={listening ? "Stop microphone" : "Start microphone"}
+            >
+              {listening ? "⏹" : "🎤"}
+            </button>
+
+            <input
+              className="text-input"
+              type="text"
+              placeholder="Type or use the mic… e.g. tomorrow at 7pm for 4 people"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") processUserText(input);
+              }}
+              disabled={loading || connected === false}
+              aria-label="Message input"
+            />
+
+            <button
+              type="button"
+              className="btn btn-primary btn-send"
+              onClick={() => processUserText(input)}
+              disabled={loading || !input.trim() || connected === false}
+              aria-label="Send message"
+            >
+              ➤
+            </button>
+          </div>
+        </section>
+
+        <aside className="status-sidebar">
+          <div className="glass-card">
+            <div className="card-header">
+              <span className="icon" aria-hidden>
+                📋
+              </span>
+              <h2>Booking</h2>
+            </div>
+            <div className="booking-details">
+              <div className="booking-field">
+                <span className="field-label">Date</span>
+                <span className={`field-value ${booking?.date ? "" : "empty"}`}>
+                  {formatDate(booking?.date) || "Not set"}
+                </span>
+              </div>
+              <div className="booking-field">
+                <span className="field-label">Time</span>
+                <span className={`field-value ${booking?.time ? "" : "empty"}`}>
+                  {formatTime(booking?.time) || "Not set"}
+                </span>
+              </div>
+              <div className="booking-field">
+                <span className="field-label">Guests</span>
+                <span className={`field-value ${booking?.party_size ? "" : "empty"}`}>
+                  {booking?.party_size ?? "Not set"}
+                </span>
+              </div>
+              <div className="booking-field">
+                <span className="field-label">Name</span>
+                <span className={`field-value ${booking?.guest_name ? "" : "empty"}`}>
+                  {booking?.guest_name || "Not set"}
+                </span>
+              </div>
+              <div className="booking-field">
+                <span className="field-label">Status</span>
+                <span className="field-value">{booking?.status?.replace("_", " ") || "pending"}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card">
+            <div className="card-header">
+              <span className="icon" aria-hidden>
+                🧠
+              </span>
+              <h2>Brain state</h2>
+            </div>
+            <div className="state-indicator">
+              <span
+                className={`state-badge ${
+                  currentState === "booked" || currentState === "goodbye"
+                    ? "confirmed"
+                    : currentState === "cancelled"
+                      ? "cancelled"
+                      : "active"
+                }`}
+              >
+                {currentState.replace(/_/g, " ")}
+              </span>
+            </div>
+            <div className="state-flow">
+              {FLOW_STEPS.map((step) => (
+                <div
+                  key={step.key}
+                  className={`state-step ${stepStatus(step.key, currentState)}`}
+                >
+                  {step.label}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="glass-card">
+            <div className="card-header">
+              <span className="icon" aria-hidden>
+                🔍
+              </span>
+              <h2>Decisions</h2>
+            </div>
+            <div className="decision-log">
+              {decisionLog.length === 0 && (
+                <p style={{ color: "var(--text-muted)", fontSize: "var(--font-xs)" }}>
+                  Intent and entity tags appear here after each of your turns.
+                </p>
+              )}
+              {decisionLog.map((entry, idx) => (
+                <div key={`${entry.text}-${idx}`} className="decision-entry">
+                  <div style={{ marginBottom: "0.25rem" }}>&ldquo;{entry.text}&rdquo;</div>
+                  {entry.intents.map((intent) => (
+                    <span key={intent} className="intent-tag">
+                      {intent}
+                    </span>
+                  ))}
+                  {Object.entries(entry.entities).map(([key, value]) => (
+                    <span key={key} className="entity-tag">
+                      {key}: {value}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="glass-card" style={{ padding: "1rem 1.25rem" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-sm)" }}>
+              <input
+                type="checkbox"
+                checked={ttsEnabled}
+                onChange={(e) => setTtsEnabled(e.target.checked)}
+              />
+              Speak assistant replies
+            </label>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ width: "100%", marginTop: "0.75rem" }}
+              onClick={resetConversation}
+              disabled={loading}
+            >
+              New conversation
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
