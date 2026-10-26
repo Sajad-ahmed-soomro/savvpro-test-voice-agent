@@ -222,34 +222,46 @@ def extract_party_size(text: str) -> Optional[int]:
     if re.search(r"\bjust\s+(?:me|myself|one|1)\b", text_lower):
         return 1
 
-    # "for 4", "party of 6", "table for 2", "4 people"
+    # Range patterns like "4 to 5" or "4-5"
+    range_match = re.search(r"(\d{1,2})\s*(?:to|[-–])\s*(\d{1,2})", text_lower)
+    if range_match:
+        low = int(range_match.group(1))
+        high = int(range_match.group(2))
+        return low if low <= high else high
+
+    # "for 4", "party of 6", "table for 2", "will be 3", "it will be 3", "we are 4"
     match = re.search(
-        r"(?:for|party\s+of|group\s+of|we\s+are|there(?:'s|s| are| will be))\s+(\d{1,2})",
+        r"(?:for|party\s+of|group\s+of|table\s+for|we\s+are|we're|we(?:\s+will|'ll)?\s+be|it(?:\s+will|'ll|'s|s)?\s+be|(?:there\s+)?(?:will\s+be|are|is|'s|s)|about|around|approx(?:\.|imately)?|just)\s+(\d{1,2})\b",
         text_lower,
     )
     if match:
         return int(match.group(1))
 
-    match = re.search(r"(\d{1,2})\s+(?:people|persons|guests|of us|pax)", text_lower)
+    # Number followed by people/guests/of us/pax
+    match = re.search(r"\b(\d{1,2})\s+(?:people|persons|guests|of\s+us|pax|seats|chairs)\b", text_lower)
     if match:
         return int(match.group(1))
 
-    # Word numbers: "for two", "party of five"
+    # Word numbers: "will be three", "for two", "party of five"
     for word, num in _WORD_NUMBERS.items():
-        pattern = rf"(?:for|party\s+of|group\s+of)\s+{word}\b"
+        pattern = rf"(?:for|party\s+of|group\s+of|table\s+for|we\s+are|we're|we(?:\s+will|'ll)?\s+be|it(?:\s+will|'ll|'s|s)?\s+be|(?:there\s+)?(?:will\s+be|are|is|'s|s)|about|around|just)\s+{word}\b"
         if re.search(pattern, text_lower):
             return num
 
-    # Standalone word number if context suggests party size
+    # Standalone word number if context is brief (e.g. "three", "four of us")
     for word, num in _WORD_NUMBERS.items():
         if re.search(rf"\b{re.escape(word)}\b", text_lower):
-            # Only match if it's a short utterance (likely answering "how many?")
-            if len(text_lower.split()) <= 4:
+            if len(text_lower.split()) <= 5:
                 return num
 
-    # Standalone digit (likely answering "how many people?")
-    if re.fullmatch(r"\s*(\d{1,2})\s*", text_lower):
-        return int(text_lower.strip())
+    # Standalone or isolated digit in short phrase (e.g. "will be 3", "just 3", "3")
+    # Exclude times (e.g. "3pm", "3:00")
+    if not re.search(r"\b\d{1,2}\s*(?::\d{2}|am|pm|a\.m\.|p\.m\.|o'clock)\b", text_lower):
+        num_match = re.search(r"\b(\d{1,2})\b", text_lower)
+        if num_match and len(text_lower.split()) <= 5:
+            val = int(num_match.group(1))
+            if 1 <= val <= 20:
+                return val
 
     return None
 

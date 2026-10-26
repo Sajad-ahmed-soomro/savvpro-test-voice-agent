@@ -108,10 +108,10 @@ _TIME_PATTERN = re.compile(
 _PARTY_PATTERN = re.compile(
     r"""
     (?:
-        \b(?:for|party\s+of|group\s+of|we\s+are|there(?:'s|s| are| will be))\s+(\d{1,2})\b
-        | \b(\d{1,2})\s+(?:people|persons|guests|of us|pax)\b
+        \b(?:for|party\s+of|group\s+of|table\s+for|we\s+are|we're|we(?:\s+will|'ll)?\s+be|it(?:\s+will|'ll|'s|s)?\s+be|(?:there\s+)?(?:will\s+be|are|is|'s|s)|about|around)\s+(\d{1,2})\b
+        | \b(\d{1,2})\s+(?:people|persons|guests|of\s+us|pax|seats)\b
         | \bjust\s+(?:me|myself|one|1)\b
-        | \b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b
+        | \b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b
         | \b(?:a\s+)?(?:couple|pair)\b
     )
     """,

@@ -7,9 +7,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
+import subprocess
+import tempfile
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from brain.engine import DialogEngine
@@ -20,6 +25,42 @@ router = APIRouter()
 
 # Singleton dialog engine shared across requests
 engine = DialogEngine()
+
+
+@router.get("/api/tts")
+async def text_to_speech(text: str):
+    """Generate audio for the given text using native system TTS."""
+    cleaned = text.replace("*", "").replace("#", "").replace("_", "").strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    say_bin = shutil.which("say")
+    if say_bin:
+        with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            subprocess.run(
+                [say_bin, "-v", "Samantha", "-o", tmp_path, cleaned],
+                check=True,
+                capture_output=True,
+            )
+            return FileResponse(tmp_path, media_type="audio/mp4")
+        except Exception as e:
+            logger.warning(f"say command failed, retrying with default voice: {e}")
+            try:
+                subprocess.run(
+                    [say_bin, "-o", tmp_path, cleaned],
+                    check=True,
+                    capture_output=True,
+                )
+                return FileResponse(tmp_path, media_type="audio/mp4")
+            except Exception as e2:
+                logger.error(f"say default voice also failed: {e2}")
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
+    raise HTTPException(status_code=501, detail="System TTS engine not available")
 
 
 # ---------------------------------------------------------------------------

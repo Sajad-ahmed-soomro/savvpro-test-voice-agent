@@ -63,7 +63,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [connected, setConnected] = useState(null);
-  const messagesEndRef = useRef(null);
 
   const appendMessage = useCallback((role, text) => {
     setMessages((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, role, text }]);
@@ -93,6 +92,10 @@ export default function Home() {
     [appendMessage, refreshDecisions],
   );
 
+  const speakRef = useRef(null);
+  const conversationIdRef = useRef(conversationId);
+  useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
+
   const processUserText = useCallback(
     async (text) => {
       const trimmed = text.trim();
@@ -104,17 +107,18 @@ export default function Home() {
       setLoading(true);
 
       try {
-        let convId = conversationId;
+        let convId = conversationIdRef.current;
         if (!convId) {
           const start = await startConversation();
           convId = start.conversation_id;
           setConversationId(convId);
+          conversationIdRef.current = convId;
           setStateInfo(start.state);
         }
 
         const result = await sendMessage(convId, trimmed);
-        const reply = await handleAssistantReply(convId, result.response, result.state);
-        speak(reply);
+        speakRef.current?.(result.response);
+        await handleAssistantReply(convId, result.response, result.state);
       } catch (err) {
         setError(err.message || "Something went wrong");
         setConnected(false);
@@ -122,14 +126,34 @@ export default function Home() {
         setLoading(false);
       }
     },
-    [appendMessage, conversationId, handleAssistantReply, loading],
+    [appendMessage, handleAssistantReply, loading],
   );
 
-  const { listening, speechSupported, ttsEnabled, setTtsEnabled, speak, startListening, stopListening } =
-    useSpeech({ onTranscript: processUserText, enabled: !loading });
+  const {
+    listening,
+    isSpeaking,
+    interimTranscript,
+    speechSupported,
+    ttsEnabled,
+    setTtsEnabled,
+    speak,
+    startListening,
+    stopListening,
+  } = useSpeech({ onTranscript: processUserText, enabled: !loading });
+
+  const messagesContainerRef = useRef(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    speakRef.current = speak;
+  }, [speak]);
+
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   }, [messages, loading]);
 
   useEffect(() => {
@@ -195,11 +219,31 @@ export default function Home() {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>Voice Assistant</h1>
-        <p className="subtitle">Rule-based restaurant booking — no LLM in the loop</p>
-        <div className="restaurant-badge">
-          <span className="dot" aria-hidden />
-          {RESTAURANT_NAME}
+        <div className="header-brand">
+          <div className="header-icon-badge">🍷</div>
+          <div>
+            <div className="header-title-row">
+              <h1>{RESTAURANT_NAME}</h1>
+              <span className="header-tag">Voice Concierge</span>
+            </div>
+            <p className="header-sub">Fine Dining Reservations • Conversational Assistant</p>
+          </div>
+        </div>
+
+        <div className="header-actions">
+          <div className={`connection-status ${connected ? "connected" : "disconnected"}`}>
+            <span className="dot" aria-hidden />
+            {connected === null ? "Connecting…" : connected ? "Backend online" : "Backend offline"}
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={resetConversation}
+            disabled={loading}
+            title="Start a new booking conversation"
+          >
+            ↺ New Reservation
+          </button>
         </div>
       </header>
 
@@ -210,16 +254,10 @@ export default function Home() {
               💬
             </span>
             <h2>Conversation</h2>
-            <div
-              className={`connection-status ${connected ? "connected" : "disconnected"}`}
-              style={{ marginLeft: "auto" }}
-            >
-              <span className="dot" aria-hidden />
-              {connected === null ? "Connecting…" : connected ? "Backend online" : "Backend offline"}
-            </div>
+            <span className="chat-counter-badge">{messages.length} messages</span>
           </div>
 
-          <div className="conversation-messages">
+          <div className="conversation-messages" ref={messagesContainerRef}>
             {messages.length === 0 && !loading && (
               <div className="empty-state">
                 <span className="icon" aria-hidden>
@@ -231,8 +269,21 @@ export default function Home() {
 
             {messages.map((msg) => (
               <div key={msg.id} className={`message ${msg.role}`}>
-                <div className="message-label">{msg.role === "user" ? "You" : "Assistant"}</div>
-                {msg.text}
+                <div className="message-header-line">
+                  <span className="message-label">{msg.role === "user" ? "You" : "Assistant"}</span>
+                  {msg.role === "assistant" && (
+                    <button
+                      type="button"
+                      className="speaker-replay-btn"
+                      onClick={() => speak(msg.text)}
+                      title="Play voice"
+                      aria-label="Play message audio"
+                    >
+                      🔊
+                    </button>
+                  )}
+                </div>
+                <div className="message-text">{msg.text}</div>
               </div>
             ))}
 
@@ -243,13 +294,35 @@ export default function Home() {
                 <span />
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           {error && (
             <p className="fade-in" style={{ padding: "0 1.5rem", color: "var(--error)", fontSize: "var(--font-sm)" }}>
               {error}
             </p>
+          )}
+
+          {listening && (
+            <div className="voice-listening-bar fade-in">
+              <span className={`voice-pulse-ring ${isSpeaking ? "speaking" : ""}`} />
+              <div className="voice-status-content">
+                <div className="voice-status-header">
+                  <span className="voice-badge">
+                    {isSpeaking ? "Listening…" : "Waiting for pause…"}
+                  </span>
+                  <span className="voice-subtext">
+                    {isSpeaking
+                      ? "Speak freely — I'll wait until you're done talking"
+                      : "Silence detected — finishing up or press stop"}
+                  </span>
+                </div>
+                {interimTranscript && (
+                  <p className="voice-transcript-preview">
+                    “{interimTranscript}”
+                  </p>
+                )}
+              </div>
+            </div>
           )}
 
           <div className="input-area">
@@ -343,27 +416,37 @@ export default function Home() {
               <h2>Brain state</h2>
             </div>
             <div className="state-indicator">
-              <span
-                className={`state-badge ${
-                  currentState === "booked" || currentState === "goodbye"
-                    ? "confirmed"
-                    : currentState === "cancelled"
-                      ? "cancelled"
-                      : "active"
-                }`}
-              >
-                {currentState.replace(/_/g, " ")}
-              </span>
-            </div>
-            <div className="state-flow">
-              {FLOW_STEPS.map((step) => (
-                <div
-                  key={step.key}
-                  className={`state-step ${stepStatus(step.key, currentState)}`}
+              <div className="state-badge-row">
+                <span className="state-badge-title">Current Phase</span>
+                <span
+                  className={`state-badge ${
+                    currentState === "booked" || currentState === "goodbye"
+                      ? "confirmed"
+                      : currentState === "cancelled"
+                        ? "cancelled"
+                        : "active"
+                  }`}
                 >
-                  {step.label}
-                </div>
-              ))}
+                  {currentState.replace(/_/g, " ")}
+                </span>
+              </div>
+              <div className="state-steps">
+                {FLOW_STEPS.map((step) => (
+                  <div
+                    key={step.key}
+                    className={`state-step ${stepStatus(step.key, currentState)}`}
+                  >
+                    <span className="step-dot" />
+                    <span className="step-name">{step.label}</span>
+                    {stepStatus(step.key, currentState) === "completed" && (
+                      <span className="step-status-tag done">✓</span>
+                    )}
+                    {stepStatus(step.key, currentState) === "current" && (
+                      <span className="step-status-tag active">active</span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -399,14 +482,25 @@ export default function Home() {
           </div>
 
           <div className="glass-card" style={{ padding: "1rem 1.25rem" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-sm)" }}>
-              <input
-                type="checkbox"
-                checked={ttsEnabled}
-                onChange={(e) => setTtsEnabled(e.target.checked)}
-              />
-              Speak assistant replies
-            </label>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "var(--font-sm)" }}>
+                <input
+                  type="checkbox"
+                  checked={ttsEnabled}
+                  onChange={(e) => setTtsEnabled(e.target.checked)}
+                />
+                Speak assistant replies
+              </label>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ fontSize: "var(--font-xs)", padding: "0.25rem 0.6rem" }}
+                onClick={() => speak("Hello! Voice output is working perfectly.")}
+                title="Test audio through your speakers"
+              >
+                🔊 Test
+              </button>
+            </div>
             <button
               type="button"
               className="btn btn-ghost"

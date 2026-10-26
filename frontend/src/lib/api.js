@@ -5,7 +5,7 @@ function resolveApiBase() {
   if (typeof window !== "undefined") {
     return "";
   }
-  return "http://localhost:8000";
+  return "http://localhost:8001";
 }
 
 const API_BASE = resolveApiBase();

@@ -22,7 +22,7 @@ No LLM is used **at runtime** for booking decisions — only deterministic Pytho
 - **Next.js 16:** Agent rules note API differences; verify `npm run build` after upgrades.
 - **Speech recognition:** Browser-dependent; Safari/Firefox may need text-only fallback.
 - **Boot effect:** Initial implementation risked re-starting conversations on re-render; fixed with a mount-only effect.
-- **CORS vs proxy:** Prefer same-origin `/api` proxy in dev; direct `localhost:8000` requires CORS config on the backend.
+- **CORS vs proxy:** Prefer same-origin `/api` proxy in dev; direct `localhost:8001` requires CORS config on the backend.
 
 ## Token usage
 

@@ -15,10 +15,10 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8001
 ```
 
-Health: `http://localhost:8000/api/health`
+Health: `http://localhost:8001/api/health`
 
 ### Frontend
 
@@ -28,7 +28,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The dev server proxies `/api/*` to the backend (`BACKEND_URL`, default `http://localhost:8000`). Use Chrome/Edge for microphone support; toggle spoken replies in the sidebar.
+Open `http://localhost:3000`. The dev server proxies `/api/*` to the backend (`BACKEND_URL`, default `http://localhost:8001`). Use Chrome/Edge for microphone support; toggle spoken replies in the sidebar.
 
 ### Tests
 

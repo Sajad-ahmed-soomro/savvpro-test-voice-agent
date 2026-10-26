@@ -119,6 +119,24 @@ class DialogEngine:
                 "Just tell me the date, time, and party size and I'll check availability."
             )
 
+        # Greeting handling: respond with a friendly welcome ONLY if the
+        # message is a pure greeting with no booking-related entities.
+        # If the user says "hello, book for tomorrow at 4pm" we fall through
+        # so that slot-filling can capture the date/time.
+        if Intent.GREETING in intents and conv.state == ConversationState.ASK_DATE:
+            # Check if there are any entity-bearing intents alongside the greeting
+            entity_intents = {
+                Intent.PROVIDE_DATE, Intent.PROVIDE_TIME,
+                Intent.PROVIDE_PARTY_SIZE, Intent.PROVIDE_NAME,
+                Intent.PROVIDE_CONTACT, Intent.BOOK,
+            }
+            if not entity_intents.intersection(intents):
+                return (
+                    f"Hello! Welcome to {config.RESTAURANT_NAME}. "
+                    "I'd love to help you book a table. "
+                    "What date would you like to reserve?"
+                )
+
         if conv.state in (ConversationState.GOODBYE, ConversationState.CANCELLED):
             if Intent.GREETING in intents or Intent.BOOK in intents:
                 # Restart
